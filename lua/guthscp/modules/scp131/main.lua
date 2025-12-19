@@ -1,14 +1,14 @@
 local MODULE = {
-	name = "SCP-939",
+	name = "SCP-131",
 	author = "Augaton",
-	version = "1.2.3",
-	description = [[SCP 939, the SCP that's need sound to do a disaster !]],
+	version = "1.0.0",
+	description = [[SCP 131 system, including compatibility with 173 system]],
 	icon = "icon16/sound_mute.png",
-	version_url = "https://raw.githubusercontent.com/Augaton/guthscp939/refs/heads/main/lua/guthscp/modules/scp939/main.lua",
+	version_url = "https://raw.githubusercontent.com/Augaton/Augaton-scp131/refs/heads/main/lua/guthscp/modules/scp131/main.lua",
 	dependencies = {
 		base = "2.4.0",
-		guthscp173 = "2.0.4"
-        guthscpkeycard = "optional:2.1.6",
+		guthscp173 = "2.0.4",
+		guthscpkeycard = "optional:2.1.6",
 	},
 	requires = {
 	 	["server.lua"] = guthscp.REALMS.SERVER,
