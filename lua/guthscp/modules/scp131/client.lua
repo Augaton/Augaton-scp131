@@ -1,28 +1,9 @@
-local scp939 = guthscp.modules.scp939
-local config939 = guthscp.configs.scp939
-scp939 = scp939 or {}
+hook.Add( "HUDPaint", "SCP131:Targeting173", function()
+    local ply = LocalPlayer()
+    if not ply:Alive() or ply:GetNWString("guthscp_role") ~= "scp131" then return end
 
-net.Receive('SCP939HUDOFF', function()
-    hook.Remove("Think", "SCP939NoDraw")
-    hook.Remove("RenderScreenspaceEffects", "PostProcess939")
-    hook.Remove("PreDrawOpaqueRenderables", "HidePlayersForSCP939")
-    hook.Remove("PostDrawTranslucentRenderables", "DrawPlayersSCP939")
-
-    for _, v in ipairs(player.GetAll()) do
-        if IsValid(v) and v ~= LocalPlayer() then
-            if v:GetMaterial() ~= "" then
-                v:SetMaterial("")
-            end
-
-            if IsValid(v:GetActiveWeapon()) then
-                v:GetActiveWeapon():SetNoDraw(false)
-            end
-        end
-
-        v:SetNoDraw(false)
+    local tr = ply:GetEyeTrace()
+    if IsValid( tr.Entity ) and tr.Entity:GetNWString("guthscp_role") == "scp173" then
+        draw.SimpleText( "STATUE FIXÉE", "DermaDefault", ScrW() / 2, ScrH() / 2 + 50, Color( 255, 0, 0 ), TEXT_ALIGN_CENTER )
     end
-
-    render.SetBlend(1)  -- Juste au cas où, reset du blend
-    render.MaterialOverride(nil)
-    render.SetColorModulation(1, 1, 1)
-end)
+end )

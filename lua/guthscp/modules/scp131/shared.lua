@@ -1,137 +1,35 @@
-local scp939 = guthscp.modules.scp939
-local config939 = guthscp.configs.scp939
-scp939 = scp939 or {}
+local scp131 = guthscp.modules.scp131
+local config131 = guthscp.configs.scp131
+scp131 = scp131 or {}
 
-scp939.filter = guthscp.players_filter:new("weapon_scp939")
-
-if SERVER then
-    scp939.filter:listen_disconnect()
-    scp939.filter:listen_weapon_users("weapon_scp939")
-
-    
-	scp939.filter.event_added:add_listener( "scp939:setup", function( ply )
-		--  speeds
-		ply:SetSlowWalkSpeed( config939.walk_speed )
-		ply:SetWalkSpeed( config939.walk_speed )
-		ply:SetRunSpeed( config939.run_speed )
-	end )
-    scp939.filter.event_removed:add_listener("scp939:reset", function( ply )
-    end)
-end
-
-function scp939.get_scps_939()
-    return scp939.filter:get_entities()
-end
-
-function scp939.is_scp_939(ply)
-    if CLIENT and ply == nil then
-        ply = LocalPlayer()
-    end
-    return scp939.filter:is_in(ply)
-end
-
-// Silent Ability
-
-hook.Add("PlayerDeath", "SCP939SilentReset", function(ply)
-    if ply.silent_step then
-        ply.silent_step = false
-    end
-end)
-
-hook.Add("PlayerFootstep", "SCP939SilentStep", function(ply, pos, foot, sound, volume, rf)
-    if scp939.is_scp_939(ply) and ply.silent_step then
-        return true -- annule le son de pas
-    end
-end)
-
-// Ping
-
-local pings = {}
-
-net.Receive("scp939_sound_ping", function()
-    local pos = net.ReadVector()
-    table.insert(pings, {
-        pos = pos,
-        time = CurTime(),
-        duration = 0.5,     
-    })
-end)
+-- On enregistre les joueurs qui portent l'arme du 131
+scp131.filter = guthscp.players_filter:new( "weapon_scp131" ) -- Remplace par le nom exact de ton swep
 
 if SERVER then
-    util.AddNetworkString("scp939_sound_ping")
+    scp131.filter:listen_disconnect()
+    scp131.filter:listen_weapon_users( "weapon_scp131" )
+
+    -- Configuration automatique au spawn/prise d'arme
+    scp131.filter.event_added:add_listener( "scp131:setup", function( ply )
+        ply:SetWalkSpeed( config131.walk_speed or 160 )
+        ply:SetRunSpeed( config131.run_speed or 350 )
+    end )
 end
 
-local matCircle = Material("vgui/circle")
-local colorRed = Color(255, 50, 50)
+function scp131.get_scps_131()
+    return scp131.filter:get_entities()
+end
 
-hook.Add("HUDPaint", "SCP939_VisualPing", function()
-    if not config939.scp939_visualping then return end 
+function scp131.is_scp_131( ply )
+    if CLIENT and ply == nil then ply = LocalPlayer() end
+    return scp131.filter:is_in( ply )
+end
 
-    local ply = LocalPlayer()
-    if not IsValid(ply) or not scp939.is_scp_939(ply) then return end
-    if #pings == 0 then return end
-
-    local curTime = CurTime()
-    local eyePos = ply:EyePos()
-
-    for i = #pings, 1, -1 do
-        local ping = pings[i]
-        local delta = curTime - ping.time
-
-        if delta > ping.duration then
-            table.remove(pings, i)
-            continue
-        end
-
-        local screenData = ping.pos:ToScreen()
-        if not screenData.visible then continue end
-
-        local tr = util.TraceLine({
-            start = eyePos,
-            endpos = ping.pos,
-            mask = MASK_OPAQUE,
-            filter = ply
-        })
-
-        if tr.Fraction < 0.99 then
-            local t = delta / ping.duration
-            
-            local radius = t * 120 
-            local alpha = (1 - t) * 200 
-
-            surface.SetMaterial(matCircle)
-            surface.SetDrawColor(255, 50, 50, alpha)
-            surface.DrawTexturedRectRotated(screenData.x, screenData.y, radius, radius, 0)
-            
-            surface.DrawTexturedRectRotated(screenData.x, screenData.y, 10, 10, 0)
-        end
+-- Compatibilité clignement (Blink)
+-- Empêche le 131 de cligner des yeux s'il est configuré comme tel
+hook.Add( "guthscp173:can_blink", "scp131:prevent_blink", function( ply )
+    if scp131.is_scp_131( ply ) then
+        local res = config131.scp131_blink_res or 0
+        if res == 0 then return false end 
     end
-end)
-
-// init 939
-
-function scp939.shouldrevealplayer(ply, target)
-    if not IsValid(target) or not target:IsPlayer() or not target:Alive() then return false end
-    if target == ply then return false end
-    if not IsValid(ply:GetActiveWeapon()) then return false end
-    if not scp939 or not scp939.is_scp_939 or not scp939.is_scp_939(ply) then return false end
-
-    -- Movement detection
-    local isMoving = target:GetVelocity():Length() > 10 and not target:Crouching()
-    -- Voice detection
-    local isTalking = target:IsSpeaking()
-    -- Shoot detection ('RemoveAttacker')
-    local hasShot = target.IsAttacker == true
-
-    return isMoving or isTalking or hasShot
-end
-
-net.Receive('PlayerShooting', function()
-    local entity = net.ReadEntity() -- Local !!
-    if not IsValid(entity) or entity.IsAttacker == true then return end
-    
-    entity.IsAttacker = true
-    timer.Create('RemoveAttacker_' .. entity:EntIndex(), 5, 1, function()
-        if IsValid(entity) then entity.IsAttacker = false end
-    end)
-end)
+end )
