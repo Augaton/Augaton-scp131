@@ -57,37 +57,6 @@ MODULE.menu = {
                 default = 350,
             },
             
-            "Abilities & Interactions",
-            {
-                type = "Bool",
-                name = "Anti-173 Passive",
-                id = "scp131_anti173",
-                desc = "If checked, SCP-173 is blocked when the SCP-131 player looks at it.",
-                default = true,
-            },
-            {
-                type = "Number",
-                name = "Blink Resistance",
-                id = "scp131_blink_res",
-                desc = "Does SCP-131 blink? (0 = never blinks, 1 = normal). Eye Pods are known for not blinking.",
-                default = 0,
-                min = 0,
-                max = 1,
-                decimals = 1,
-            },
-
-            "Sounds (Player Triggered)",
-            {
-                type = "String[]",
-                name = "Chirp Sounds",
-                id = "chirp_sounds",
-                desc = "Sounds played when the player uses their SWEP (Left/Right click).",
-                default = {
-                    "sfx/scp131/chirp1.mp3",
-                    "sfx/scp131/chirp2.mp3",
-                    "sfx/scp131/chirp3.mp3",
-                },
-            },
         },
     },
     details = {
