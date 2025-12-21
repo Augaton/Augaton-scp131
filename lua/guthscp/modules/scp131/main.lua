@@ -7,13 +7,12 @@ local MODULE = {
     version_url = "https://raw.githubusercontent.com/Augaton/Augaton-scp131/refs/heads/main/lua/guthscp/modules/scp131/main.lua",
     dependencies = {
         base = "2.4.0",
-        guthscp173 = "2.0.4",
+        guthscp173 = "2.1.0",
         guthscpkeycard = "optional:2.1.6",
     },
     requires = {
         ["server.lua"] = guthscp.REALMS.SERVER,
         ["shared.lua"] = guthscp.REALMS.SHARED,
-        ["client.lua"] = guthscp.REALMS.CLIENT,
     },
 }
 

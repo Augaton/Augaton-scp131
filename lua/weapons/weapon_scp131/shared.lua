@@ -37,9 +37,12 @@ end
 function SWEP:Deploy() 
     if SERVER then
         local ply = self:GetOwner()
-        -- On s'assure que la vitesse est bien appliquée
         ply:SetWalkSpeed(config131.walk_speed or 160)
         ply:SetRunSpeed(config131.run_speed or 350)
     end
     return true 
+end
+
+if CLIENT then
+    guthscp.spawnmenu.add_weapon(SWEP, "SCP-131")
 end
