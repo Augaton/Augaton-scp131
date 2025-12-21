@@ -44,5 +44,5 @@ function SWEP:Deploy()
 end
 
 if CLIENT then
-    guthscp.spawnmenu.add_weapon(SWEP, "SCP-131")
+    guthscp.spawnmenu.add_weapon(SWEP, "SCPs")
 end
