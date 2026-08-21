@@ -37,7 +37,7 @@ end
 function scp131.get_variant( ply )
     if not IsValid( ply ) then return "A" end
 
-    return ply:GetNWString( "scp131:variant", "A" )
+    return ply:GetNW2String( "scp131:variant", "A" )
 end
 
 function scp131.get_name( ply )
@@ -48,7 +48,7 @@ end
 function scp131.is_stunned( ply )
     if not IsValid( ply ) then return false end
 
-    return ply:GetNWFloat( "scp131:stunned_until", 0 ) > CurTime()
+    return ply:GetNW2Float( "scp131:stunned_until", 0 ) > CurTime()
 end
 
 --  les deux pods se donnent du courage quand ils roulent ensemble
@@ -56,9 +56,13 @@ function scp131.is_swarming( ply )
     local distance = config131.swarm_distance
     if distance <= 0 then return false end
 
+    --  appele a chaque tick par le deplacement : le cas courant (un seul pod) sort tout de suite
+    local pods = scp131.get_scps_131()
+    if #pods < 2 then return false end
+
     local origin, distance_sqr = ply:GetPos(), distance * distance
 
-    for _, other in ipairs( scp131.get_scps_131() ) do
+    for _, other in ipairs( pods ) do
         if other == ply or not IsValid( other ) then continue end
         if origin:DistToSqr( other:GetPos() ) <= distance_sqr then return true end
     end
@@ -70,7 +74,7 @@ end
 function scp131.get_watched_173( ply )
     if not IsValid( ply ) then return end
 
-    local ent = ply:GetNWEntity( "scp131:watched_173", NULL )
+    local ent = ply:GetNW2Entity( "scp131:watched_173", NULL )
     return IsValid( ent ) and ent or nil
 end
 
@@ -78,7 +82,7 @@ end
 function scp131.get_watcher( scp )
     if not IsValid( scp ) then return end
 
-    local ent = scp:GetNWEntity( "scp131:watcher", NULL )
+    local ent = scp:GetNW2Entity( "scp131:watcher", NULL )
     return IsValid( ent ) and ent or nil
 end
 
@@ -91,7 +95,7 @@ end
 function scp131.get_companion( ply )
     if not IsValid( ply ) then return end
 
-    local ent = ply:GetNWEntity( "scp131:companion", NULL )
+    local ent = ply:GetNW2Entity( "scp131:companion", NULL )
     return IsValid( ent ) and ent or nil
 end
 
@@ -152,7 +156,7 @@ if SERVER then
             taken[scp131.get_variant( other )] = true
         end
 
-        ply:SetNWString( "scp131:variant", taken["A"] and not taken["B"] and "B" or "A" )
+        ply:SetNW2String( "scp131:variant", taken["A"] and not taken["B"] and "B" or "A" )
         scp131.apply_color( ply )
     end
 
@@ -162,7 +166,7 @@ if SERVER then
         local previous = scp131.get_companion( pod )
         if previous == companion then return end
 
-        pod:SetNWEntity( "scp131:companion", companion or NULL )
+        pod:SetNW2Entity( "scp131:companion", companion or NULL )
         pod.scp131_last_attention = CurTime()
 
         hook.Run( "scp131:companion_changed", pod, companion, previous )
@@ -179,8 +183,8 @@ if SERVER then
 
         local time = CurTime()
 
-        ply:SetNWFloat( "scp131:stunned_from", time )
-        ply:SetNWFloat( "scp131:stunned_until", time + duration )
+        ply:SetNW2Float( "scp131:stunned_from", time )
+        ply:SetNW2Float( "scp131:stunned_until", time + duration )
         ply.scp131_wheel_speed = 0
         ply.scp131_wheel_commanded = 0
         ply.scp131_climb_time = 0
@@ -190,7 +194,7 @@ if SERVER then
         end
 
         --  le contact avec le 173 doit tomber immediatement, sans attendre le prochain tick de garde
-        ply:SetNWEntity( "scp131:watched_173", NULL )
+        ply:SetNW2Entity( "scp131:watched_173", NULL )
 
         if sounds and #sounds > 0 then
             guthscp.sound.play( ply, sounds, config131.sound_hear_distance, false, config131.sound_volume )
@@ -220,9 +224,9 @@ if SERVER then
 
         scp131.set_companion( ply, nil )
 
-        ply:SetNWString( "scp131:variant", "A" )
-        ply:SetNWFloat( "scp131:stunned_until", 0 )
-        ply:SetNWEntity( "scp131:watched_173", NULL )
+        ply:SetNW2String( "scp131:variant", "A" )
+        ply:SetNW2Float( "scp131:stunned_until", 0 )
+        ply:SetNW2Entity( "scp131:watched_173", NULL )
         ply:SetColor( color_white )
         ply:SetPlayerColor( Vector( 1, 1, 1 ) )
     end )

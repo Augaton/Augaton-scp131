@@ -21,6 +21,30 @@ local color_dim = Color( 190, 190, 190 )
 local color_alert = Color( 220, 70, 60 )
 local color_hold = Color( 120, 220, 130 )
 
+--  etat du lien en cours, pousse par le serveur uniquement au proprietaire
+local bond_target, bond_progress, bond_expiry = NULL, 0, 0
+
+net.Receive( "scp131:bond_channel", function()
+    bond_target = net.ReadEntity()
+    bond_progress = net.ReadUInt( 7 ) / 100
+
+    --  filet de securite : si un message de fin se perd, la barre s'efface d'elle-meme
+    bond_expiry = CurTime() + 1
+end )
+
+--  la liste des pods se lit dans un hook de rendu : on la rafraichit a la cadence de l'affichage
+local POD_CACHE_RATE = 0.25
+local next_pod_cache, cached_pods = 0, {}
+
+local function get_cached_pods( ply )
+    if CurTime() >= next_pod_cache then
+        next_pod_cache = CurTime() + POD_CACHE_RATE
+        cached_pods = scp131.get_pods( ply )
+    end
+
+    return cached_pods
+end
+
 local function variant_color( ply )
     return scp131.get_variant( ply ) == "B" and config131.color_b or config131.color_a
 end
@@ -102,15 +126,10 @@ local function draw_pod_hud( ply )
     end
 
     --  progression du lien en cours
-    if not config131.bond_enabled then return end
+    local target = bond_target
+    if not IsValid( target ) or CurTime() > bond_expiry then return end
 
-    local weapon = ply:GetActiveWeapon()
-    if not IsValid( weapon ) or weapon:GetClass() ~= "weapon_scp131" then return end
-
-    local target = weapon:GetNWEntity( "scp131:bond_target", NULL )
-    if not IsValid( target ) then return end
-
-    local progress = math.Clamp( weapon:GetNWFloat( "scp131:bond_progress", 0 ), 0, 1 )
+    local progress = math.Clamp( bond_progress, 0, 1 )
     local width, height = 260, 10
     local x, y = center_x - width * 0.5, ScrH() * 0.62
 
@@ -147,7 +166,7 @@ local function draw_173_hud( ply )
 end
 
 local function draw_companion_hud( ply )
-    local pods = scp131.get_pods( ply )
+    local pods = get_cached_pods( ply )
     if #pods == 0 then return end
 
     local y = ScrH() * 0.78
