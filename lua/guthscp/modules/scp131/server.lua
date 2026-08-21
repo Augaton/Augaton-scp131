@@ -5,6 +5,24 @@ local config131 = guthscp.configs.scp131
 local UPDATE_RATE = 0.25
 local next_update = 0
 
+util.AddNetworkString( "scp131:bond_channel" )
+
+--[[
+    Progression du lien.
+
+    Elle ne regarde que le pod : une variable reseau sur le SWEP serait diffusee a
+    tout le serveur dix fois par seconde pendant l'incantation. Un message cible au
+    proprietaire suffit, et rien ne remonte du client vers le serveur.
+]]
+function scp131.network_bond_channel( ply, target, progress )
+    if not IsValid( ply ) or not ply:IsPlayer() then return end
+
+    net.Start( "scp131:bond_channel" )
+        net.WriteEntity( IsValid( target ) and target or NULL )
+        net.WriteUInt( math.Clamp( math.floor( ( progress or 0 ) * 100 ), 0, 100 ), 7 )
+    net.Send( ply )
+end
+
 local function notify( ply, text )
     if not IsValid( ply ) then return end
     if not DarkRP or not DarkRP.notify then return end
@@ -93,6 +111,7 @@ end )
 hook.Add( "guthscp173:can_freeze_173", "scp131:guard_173", function( ent, scp )
     if not ent:IsPlayer() or not scp131.is_scp_131( ent ) then return end
     if scp131.is_stunned( ent ) then return false end
+    if ent:GetMoveType() == MOVETYPE_NOCLIP then return false end  --  staff en noclip
 
     local distance = config131.guard_distance
     if distance > 0 and ent:GetPos():DistToSqr( scp:GetPos() ) > distance * distance then return false end
@@ -151,7 +170,10 @@ hook.Add( "Think", "scp131:think", function()
             end
         end
 
-        pod:SetNWEntity( "scp131:watched_173", watched or NULL )
+        --  ecriture seulement sur changement : cette boucle passe quatre fois par seconde
+        if pod:GetNW2Entity( "scp131:watched_173", NULL ) ~= ( watched or NULL ) then
+            pod:SetNW2Entity( "scp131:watched_173", watched or NULL )
+        end
 
         --  le lien se defait tout seul si le compagnon ne s'occupe plus de lui
         if config131.bond_enabled then
@@ -175,7 +197,10 @@ hook.Add( "Think", "scp131:think", function()
     for _, scp in ipairs( scps_173 ) do
         if not IsValid( scp ) then continue end
 
-        scp:SetNWEntity( "scp131:watcher", watchers[scp] or NULL )
+        local watcher = watchers[scp] or NULL
+        if scp:GetNW2Entity( "scp131:watcher", NULL ) ~= watcher then
+            scp:SetNW2Entity( "scp131:watcher", watcher )
+        end
     end
 end )
 

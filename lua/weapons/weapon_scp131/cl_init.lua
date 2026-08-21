@@ -11,9 +11,9 @@ hook.Add( "CalcView", "SCP131:ViewAdjustment", function( ply, pos, angles, fov )
     view.fov = fov
 
     --  renverse : le pod part en vrille le temps de se remettre sur sa roue
-    local stunned_until = ply:GetNWFloat( "scp131:stunned_until", 0 )
+    local stunned_until = ply:GetNW2Float( "scp131:stunned_until", 0 )
     if stunned_until > CurTime() then
-        local stunned_from = ply:GetNWFloat( "scp131:stunned_from", stunned_until )
+        local stunned_from = ply:GetNW2Float( "scp131:stunned_from", stunned_until )
         local duration = math.max( stunned_until - stunned_from, 0.1 )
         local ratio = math.Clamp( ( stunned_until - CurTime() ) / duration, 0, 1 )
 

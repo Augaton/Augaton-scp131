@@ -16,7 +16,7 @@ SWEP.ViewModel              = ""
 SWEP.WorldModel             = ""
 
 SWEP.Spawnable              = true
-SWEP.AdminOnly              = false
+SWEP.AdminOnly              = true  --  donne par le metier, jamais spawnable par un joueur
 
 SWEP.Primary.ClipSize       = -1
 SWEP.Primary.DefaultClip    = -1
@@ -94,8 +94,7 @@ if SERVER then
         self.bond_target = nil
         self.bond_started = nil
 
-        self:SetNWEntity( "scp131:bond_target", NULL )
-        self:SetNWFloat( "scp131:bond_progress", 0 )
+        scp131.network_bond_channel( self:GetOwner(), nil, 0 )
     end
 
     function SWEP:Think()
@@ -119,8 +118,7 @@ if SERVER then
         if self.bond_target ~= target then
             self.bond_target = target
             self.bond_started = CurTime()
-
-            self:SetNWEntity( "scp131:bond_target", target )
+            self.next_bond_update = 0
         end
 
         local progress = ( CurTime() - self.bond_started ) / math.max( config131.bond_time, 0.1 )
@@ -130,7 +128,7 @@ if SERVER then
             if CurTime() >= ( self.next_bond_update or 0 ) then
                 self.next_bond_update = CurTime() + BOND_UPDATE_RATE
 
-                self:SetNWFloat( "scp131:bond_progress", progress )
+                scp131.network_bond_channel( owner, target, progress )
             end
 
             return
