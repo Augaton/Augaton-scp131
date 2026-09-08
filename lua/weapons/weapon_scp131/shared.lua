@@ -5,13 +5,20 @@ if not guthscp then
     return
 end
 
+--[[
+    Porter cette arme, c'est etre SCP-131 : le module la filtre par sa classe.
+    Le deplacement, le corps et la garde du 173 vivent dans le module, pas ici :
+    ils doivent continuer quand le pod range l'arme (mains, carte). L'arme ne
+    porte que le gazouillis et le lien avec un joueur.
+]]
+
 local scp131 = guthscp.modules.scp131
 local config131 = guthscp.configs.scp131
 
 SWEP.Category               = "GuthSCP"
 SWEP.PrintName              = "SCP-131"
 SWEP.Author                 = "Augaton"
-SWEP.Instructions           = "Clic gauche : gazouiller | Clic droit maintenu sur un joueur : s'attacher ou se detacher | Saut maintenu face a un mur : grimper"
+SWEP.Instructions           = "Clic gauche : gazouiller | Clic droit maintenu sur un joueur : s'attacher ou se detacher | Sprint : pleine vitesse | Reculer : freiner | Saut maintenu face a un mur : grimper"
 SWEP.ViewModel              = ""
 SWEP.WorldModel             = ""
 
@@ -52,21 +59,13 @@ function SWEP:Deploy()
     return true
 end
 
---  gazouillis
+--  le modele n'a aucune animation : rien a jouer, seulement le son
 function SWEP:PrimaryAttack()
     self:SetNextPrimaryFire( CurTime() + math.max( config131.chirp_cooldown, 0.1 ) )
 
-    local owner = self:GetOwner()
-    if not IsValid( owner ) then return end
-
-    owner:SetAnimation( PLAYER_ATTACK1 )
-
     if CLIENT then return end
 
-    local sounds = config131.chirp_sounds
-    if not sounds or #sounds == 0 then return end
-
-    guthscp.sound.play( owner, sounds, config131.sound_hear_distance, false, config131.sound_volume )
+    scp131.play_sound( self:GetOwner(), scp131.get_sounds( "chirp" ) )
 end
 
 --  le lien se noue en maintenant le clic droit : tout se joue dans Think
@@ -137,11 +136,7 @@ if SERVER then
         --  viser son propre compagnon rompt le lien
         local companion = scp131.get_companion( owner )
         scp131.set_companion( owner, companion ~= target and target or nil )
-
-        local sounds = config131.chirp_sounds
-        if sounds and #sounds > 0 then
-            guthscp.sound.play( owner, sounds, config131.sound_hear_distance, false, config131.sound_volume )
-        end
+        scp131.play_sound( owner, scp131.get_sounds( "chirp" ) )
 
         self.bond_locked = true
         self:reset_bond_channel()

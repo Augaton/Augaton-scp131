@@ -1,3 +1,22 @@
+--[[
+    SCP-131 : les Eye Pods.
+
+    Deux principes tiennent ce fichier :
+
+    - Le deplacement est SANS ETAT. La vitesse de la roue n'est stockee nulle part,
+      elle EST la velocite du joueur : SetupMove la lit, la corrige et la repose.
+      Tout champ Lua accumule dans SetupMove (vitesse, direction) derape a la
+      re-prediction du client, qui rejoue plusieurs fois le meme tick sans
+      restaurer les tables Lua ; la velocite, elle, fait partie de l'etat predit.
+      Pour que la velocite survive d'un tick a l'autre, la friction moteur du
+      joueur est mise a zero : l'erre et le freinage sont entierement a nous.
+
+    - Le corps est celui d'une creature de 30 cm. Hull, hauteur de vue et friction
+      ne sont PAS repliques par le moteur : ils sont poses dans les deux realms
+      (evenements du filtre, qui se synchronise aussi cote client), sinon le client
+      predit avec un corps humain et le serveur corrige a chaque tick.
+]]
+
 local scp131 = guthscp.modules.scp131
 local config131 = guthscp.configs.scp131
 
@@ -8,8 +27,10 @@ scp131.filter = guthscp.players_filter:new( "weapon_scp131" )
 local CRASH_SPEED_RATIO = 0.45
 --  en dessous, la roue est consideree a l'arret
 local WHEEL_MIN_SPEED = 5
---  hauteur du rayon cherchant un mur a grimper, depuis les pieds
-local CLIMB_TRACE_HEIGHT = 20
+--  pousser a contresens au-dela de cet angle freine au lieu de tourner
+local BRAKE_DOT = -0.3
+--  un pod sonne perd son erre plus vite qu'une roue qui roule droit
+local STUN_DRAG = 3
 --  vitesse a laquelle le pod se colle au mur pendant l'escalade
 local CLIMB_STICK_SPEED = 30
 
@@ -44,7 +65,7 @@ function scp131.get_name( ply )
     return "SCP-131-" .. scp131.get_variant( ply )
 end
 
---  etourdi : ni roulade, ni escalade, ni contact visuel sur le 173
+--  etourdi : ni pilotage, ni escalade, ni contact visuel sur le 173
 function scp131.is_stunned( ply )
     if not IsValid( ply ) then return false end
 
@@ -68,6 +89,28 @@ function scp131.is_swarming( ply )
     end
 
     return false
+end
+
+--  vitesse de roulement actuelle, lue sur la velocite (voir le bandeau)
+function scp131.get_wheel_speed( ply )
+    if not IsValid( ply ) then return 0 end
+
+    return ply:GetVelocity():Length2D()
+end
+
+--  plafond de vitesse du moment, sprint et essaim compris
+function scp131.get_max_speed( ply, sprinting )
+    local max_speed = config131.wheel_max_speed
+
+    if not sprinting then
+        max_speed = max_speed * config131.wheel_cruise_ratio
+    end
+
+    if scp131.is_swarming( ply ) then
+        max_speed = max_speed * ( 1 + config131.swarm_speed_bonus / 100 )
+    end
+
+    return max_speed
 end
 
 --  le 173 fige actuellement par ce pod
@@ -129,6 +172,77 @@ function scp131.is_looking_at( ply, ent )
 end
 
 
+--=========================================================================
+--  Corps : hull, vue et friction, dans les deux realms
+--=========================================================================
+
+--[[
+    Le moteur ne replique ni le hull ni la friction : cette fonction tourne sur
+    le serveur ET sur chaque client (le filtre guthscp se synchronise et declenche
+    ses evenements des deux cotes). Les valeurs d'origine sont gardees sur le
+    joueur pour etre rendues telles quelles a la sortie du role, quel que soit
+    l'addon qui les avait posees.
+]]
+function scp131.apply_body( ply )
+    if not IsValid( ply ) then return end
+
+    if not ply.scp131_body_backup then
+        local hull_mins, hull_maxs = ply:GetHull()
+        local duck_mins, duck_maxs = ply:GetHullDuck()
+
+        ply.scp131_body_backup = {
+            hull_mins = hull_mins,
+            hull_maxs = hull_maxs,
+            duck_mins = duck_mins,
+            duck_maxs = duck_maxs,
+            view = ply:GetViewOffset(),
+            view_ducked = ply:GetViewOffsetDucked(),
+            friction = ply:GetFriction(),
+        }
+    end
+
+    --  replis : cote client, le filtre peut se synchroniser avant la config
+    local radius = config131.hull_radius or 10
+    local height = config131.hull_height or 22
+    local mins, maxs = Vector( -radius, -radius, 0 ), Vector( radius, radius, height )
+
+    --  pas d'accroupissement : un pod n'a rien a plier
+    ply:SetHull( mins, maxs )
+    ply:SetHullDuck( mins, maxs )
+
+    local view = Vector( 0, 0, math.min( config131.view_height or 16, height - 2 ) )
+    ply:SetViewOffset( view )
+    ply:SetViewOffsetDucked( view )
+end
+
+function scp131.restore_body( ply )
+    if not IsValid( ply ) then return end
+
+    local backup = ply.scp131_body_backup
+    if not backup then return end
+
+    ply.scp131_body_backup = nil
+
+    ply:SetHull( backup.hull_mins, backup.hull_maxs )
+    ply:SetHullDuck( backup.duck_mins, backup.duck_maxs )
+    ply:SetViewOffset( backup.view )
+    ply:SetViewOffsetDucked( backup.view_ducked )
+    ply:SetFriction( backup.friction )
+end
+
+scp131.filter.event_added:add_listener( "scp131:body", scp131.apply_body )
+scp131.filter.event_removed:add_listener( "scp131:body", scp131.restore_body )
+
+--  la config arrive (ou change) dans les deux realms : les pods en jeu prennent les cotes sans repasser par le metier
+hook.Add( "guthscp.config:applied", "scp131:body", function( id )
+    if id ~= "scp131" then return end
+
+    for _, pod in ipairs( scp131.get_scps_131() ) do
+        scp131.apply_body( pod )
+    end
+end )
+
+
 if SERVER then
     --=====================================================================
     --  Cycle de vie du role
@@ -139,11 +253,10 @@ if SERVER then
         ply:SetRunSpeed( config131.run_speed )
     end
 
-    function scp131.apply_color( ply )
-        local color = scp131.get_variant( ply ) == "B" and config131.color_b or config131.color_a
-
-        ply:SetColor( color )
-        ply:SetPlayerColor( Vector( color.r / 255, color.g / 255, color.b / 255 ) )
+    --  le modele porte ses deux robes : skin 1 orange (A), skin 0 jaune (B).
+    --  Une teinte SetColor salirait l'oeil et le pneu, on n'y touche pas.
+    function scp131.apply_skin( ply )
+        ply:SetSkin( scp131.get_variant( ply ) == "B" and 0 or 1 )
     end
 
     --  le premier pod devient A, le second B
@@ -157,7 +270,7 @@ if SERVER then
         end
 
         ply:SetNW2String( "scp131:variant", taken["A"] and not taken["B"] and "B" or "A" )
-        scp131.apply_color( ply )
+        scp131.apply_skin( ply )
     end
 
     function scp131.set_companion( pod, companion )
@@ -172,22 +285,40 @@ if SERVER then
         hook.Run( "scp131:companion_changed", pod, companion, previous )
     end
 
+    --  sons ponctuels : EmitSound suffit et lit aussi bien les fichiers de base que les fichiers custom
+    function scp131.play_sound( ply, sounds )
+        if not IsValid( ply ) then return end
+        if not istable( sounds ) or #sounds == 0 then return end
+
+        local path = sounds[math.random( #sounds )]
+        if not isstring( path ) or path == "" then return end
+
+        ply:EmitSound( path, config131.sound_level, math.random( 95, 110 ), config131.sound_volume, CHAN_VOICE )
+    end
+
+    --  chaque famille de sons se replie sur la precedente quand elle est vide
+    function scp131.get_sounds( kind )
+        if kind == "crash" and #config131.crash_sounds > 0 then return config131.crash_sounds end
+        if kind ~= "chirp" and #config131.distress_sounds > 0 then return config131.distress_sounds end
+
+        return config131.chirp_sounds
+    end
+
     --[[
         Renverse le pod : il part en roulade et perd tout contact visuel.
 
         C'est la seule prise que les autres ont sur lui, puisqu'il ne peut pas
         mourir : sans ca, un 131 pose dans un couloir fige le 173 indefiniment.
+        La force est ajoutee a la velocite (c'est ce que fait SetVelocity sur un
+        joueur) et coule ensuite sur l'erre de la roue.
     ]]
-    function scp131.tumble( ply, force, duration, sounds )
+    function scp131.tumble( ply, force, duration, kind )
         if not IsValid( ply ) then return end
 
         local time = CurTime()
 
         ply:SetNW2Float( "scp131:stunned_from", time )
         ply:SetNW2Float( "scp131:stunned_until", time + duration )
-        ply.scp131_wheel_speed = 0
-        ply.scp131_wheel_commanded = 0
-        ply.scp131_climb_time = 0
 
         if force then
             ply:SetVelocity( force )
@@ -196,17 +327,13 @@ if SERVER then
         --  le contact avec le 173 doit tomber immediatement, sans attendre le prochain tick de garde
         ply:SetNW2Entity( "scp131:watched_173", NULL )
 
-        if sounds and #sounds > 0 then
-            guthscp.sound.play( ply, sounds, config131.sound_hear_distance, false, config131.sound_volume )
-        end
+        scp131.play_sound( ply, scp131.get_sounds( kind or "distress" ) )
     end
 
     scp131.filter.event_added:add_listener( "scp131:setup", function( ply )
         --  on garde les vitesses du metier pour pouvoir les rendre en sortant du role
         ply.scp131_previous_speeds = { walk = ply:GetWalkSpeed(), run = ply:GetRunSpeed() }
-        ply.scp131_wheel_speed = 0
-        ply.scp131_wheel_commanded = 0
-        ply.scp131_climb_time = 0
+        ply.scp131_last_speed = 0
 
         scp131.apply_speeds( ply )
         scp131.assign_variant( ply )
@@ -227,8 +354,7 @@ if SERVER then
         ply:SetNW2String( "scp131:variant", "A" )
         ply:SetNW2Float( "scp131:stunned_until", 0 )
         ply:SetNW2Entity( "scp131:watched_173", NULL )
-        ply:SetColor( color_white )
-        ply:SetPlayerColor( Vector( 1, 1, 1 ) )
+        ply:SetSkin( 0 )
     end )
 end
 
@@ -237,17 +363,71 @@ end
 --  Deplacement : la roue et l'escalade
 --=========================================================================
 
-local function trace_climbable_wall( ply, forward )
-    local start = ply:GetPos() + Vector( 0, 0, CLIMB_TRACE_HEIGHT )
+local function trace_wall( ply, forward, height )
+    local start = ply:GetPos() + Vector( 0, 0, height )
 
     return util.TraceHull( {
         start = start,
         endpos = start + forward * config131.climb_reach,
-        mins = Vector( -6, -6, -6 ),
-        maxs = Vector( 6, 6, 6 ),
+        mins = Vector( -4, -4, -2 ),
+        maxs = Vector( 4, 4, 2 ),
         filter = ply,
         mask = MASK_PLAYERSOLID,
     } )
+end
+
+local function strip_buttons( mv, buttons )
+    mv:SetButtons( bit.band( mv:GetButtons(), bit.bnot( buttons ) ) )
+end
+
+--[[
+    Escalade : saut maintenu face a une paroi.
+
+    Deux rayons, l'un au sommet du corps, l'autre aux pieds. Tant que le sommet
+    touche le mur, le pod monte en s'y collant. Quand seul le bas touche encore,
+    le corps depasse le rebord : on le bascule par-dessus au lieu de le laisser
+    retomber, c'est ce qui rendait l'ancienne escalade penible en haut des murs.
+    Le compteur de souffle est un champ Lua, il n'avance qu'au premier passage
+    du tick pour ne pas doubler a la re-prediction ; une petite derive y est
+    sans consequence, il ne borne qu'une duree.
+]]
+local function try_climb( ply, mv, move_angles, delta )
+    local climb_time = ply.scp131_climb_time or 0
+    if config131.climb_max_time > 0 and climb_time >= config131.climb_max_time then return false end
+
+    local forward = move_angles:Forward()
+    forward.z = 0
+    if forward:IsZero() then return false end
+    forward:Normalize()
+
+    local _, maxs = ply:GetHull()
+    local high = trace_wall( ply, forward, maxs.z - 3 )
+    local low = trace_wall( ply, forward, 4 )
+    local wall = high.Hit and high or ( low.Hit and low or nil )
+
+    --  une paroi, pas une pente : le moteur monte les pentes tout seul
+    if not wall or math.abs( wall.HitNormal.z ) >= 0.3 then return false end
+
+    if IsFirstTimePredicted() then
+        ply.scp131_climb_time = climb_time + delta
+    end
+
+    if high.Hit then
+        mv:SetVelocity( Vector(
+            -high.HitNormal.x * CLIMB_STICK_SPEED,
+            -high.HitNormal.y * CLIMB_STICK_SPEED,
+            config131.climb_speed
+        ) )
+    else
+        mv:SetVelocity( forward * config131.climb_speed + Vector( 0, 0, config131.climb_speed ) )
+    end
+
+    --  le saut du moteur viendrait contrarier la montee
+    strip_buttons( mv, IN_JUMP )
+    mv:SetForwardSpeed( 0 )
+    mv:SetSideSpeed( 0 )
+
+    return true
 end
 
 hook.Add( "SetupMove", "scp131:movement", function( ply, mv, cmd )
@@ -255,6 +435,10 @@ hook.Add( "SetupMove", "scp131:movement", function( ply, mv, cmd )
 
     --  noclip du staff, echelles, nage : on laisse le moteur faire son travail
     if ply:GetMoveType() ~= MOVETYPE_WALK then return end
+
+    --  un pod ne s'accroupit pas
+    strip_buttons( mv, IN_DUCK )
+
     if ply:WaterLevel() >= 2 then return end
 
     --  SetupMove tourne une fois par tick sur les deux realms : le pas de temps doit
@@ -268,88 +452,73 @@ hook.Add( "SetupMove", "scp131:movement", function( ply, mv, cmd )
         ply.scp131_climb_time = 0
     end
 
-    --  escalade des surfaces verticales : maintenir le saut face a un mur
-    if config131.climb_enabled and not stunned and mv:KeyDown( IN_JUMP ) then
-        local climb_time = ply.scp131_climb_time or 0
-        local out_of_breath = config131.climb_max_time > 0 and climb_time >= config131.climb_max_time
-
-        if not out_of_breath then
-            local forward = move_angles:Forward()
-            forward.z = 0
-            forward:Normalize()
-
-            local trace = trace_climbable_wall( ply, forward )
-
-            --  une paroi, pas une pente : la normale doit etre quasi horizontale
-            if trace.Hit and math.abs( trace.HitNormal.z ) < 0.3 then
-                ply.scp131_climb_time = climb_time + delta
-                ply.scp131_wheel_speed = 0
-                ply.scp131_wheel_commanded = 0
-
-                mv:SetVelocity( Vector(
-                    -trace.HitNormal.x * CLIMB_STICK_SPEED,
-                    -trace.HitNormal.y * CLIMB_STICK_SPEED,
-                    config131.climb_speed
-                ) )
-
-                --  le saut du moteur viendrait contrarier la montee
-                mv:SetButtons( bit.band( mv:GetButtons(), bit.bnot( IN_JUMP ) ) )
-                mv:SetForwardSpeed( 0 )
-                mv:SetSideSpeed( 0 )
-                return
-            end
-        end
+    if config131.climb_enabled and not stunned and mv:KeyDown( IN_JUMP )
+        and try_climb( ply, mv, move_angles, delta ) then
+        return
     end
 
     if not config131.wheel_enabled then
+        if ply:GetFriction() ~= 1 then ply:SetFriction( 1 ) end
+
         if stunned then
             mv:SetForwardSpeed( 0 )
             mv:SetSideSpeed( 0 )
+            strip_buttons( mv, IN_JUMP )
         end
 
         return
     end
 
+    --  la friction du moteur mangerait 12 % de la velocite a chaque tick : l'erre est a nous
+    if ply:GetFriction() ~= 0 then ply:SetFriction( 0 ) end
+
     local velocity = mv:GetVelocity()
-    local speed = ply.scp131_wheel_speed or 0
-    local direction = ply.scp131_wheel_dir
+    local flat = Vector( velocity.x, velocity.y, 0 )
+    local speed = flat:Length()
+    local direction = speed > WHEEL_MIN_SPEED and flat / speed or nil
 
-    if not direction or direction:IsZero() then
-        direction = move_angles:Forward()
-        direction.z = 0
-        direction:Normalize()
-    end
+    --  percuter un mur : la vitesse reelle s'effondre par rapport a celle posee au tick precedent.
+    --  Decide par le serveur seul : l'etourdissement est un etat reseau, pas une prediction.
+    if SERVER and config131.crash_enabled and not stunned and on_ground then
+        local last_speed = ply.scp131_last_speed or 0
 
-    --  percuter un mur : la vitesse reelle s'effondre alors qu'on commandait une roulade rapide
-    if SERVER and config131.crash_enabled and not stunned and ply:Alive() then
-        local commanded = ply.scp131_wheel_commanded or 0
-
-        if commanded >= config131.crash_min_speed and velocity:Length2D() < commanded * CRASH_SPEED_RATIO then
-            local sounds = #config131.crash_sounds > 0 and config131.crash_sounds
-                or ( #config131.distress_sounds > 0 and config131.distress_sounds or nil )
+        if last_speed >= config131.crash_min_speed and speed < last_speed * CRASH_SPEED_RATIO then
+            scp131.tumble( ply, nil, config131.crash_stun_time, "crash" )
 
             --  le rebond passe par le CMoveData : une vitesse posee sur le joueur pendant
             --  SetupMove serait ecrasee par le deplacement du tick en cours
-            scp131.tumble( ply, nil, config131.crash_stun_time, sounds )
-            mv:SetVelocity( -direction * commanded * 0.35 + Vector( 0, 0, 80 ) )
+            local last_direction = ply.scp131_last_direction or -move_angles:Forward()
+            mv:SetVelocity( -last_direction * last_speed * 0.3 + Vector( 0, 0, 90 ) )
 
             stunned = true
         end
     end
 
-    --  etourdi : on lache le pilotage, le pod part sur son erre et le moteur le freine
+    --  etourdi : on lache le pilotage, le pod part sur son erre et s'y epuise
     if stunned then
-        ply.scp131_wheel_speed = 0
-        ply.scp131_wheel_commanded = 0
+        if on_ground then
+            speed = math.max( 0, speed - config131.wheel_coast_deceleration * STUN_DRAG * delta )
+
+            if direction and speed >= WHEEL_MIN_SPEED then
+                mv:SetVelocity( Vector( direction.x * speed, direction.y * speed, velocity.z ) )
+            else
+                mv:SetVelocity( Vector( 0, 0, velocity.z ) )
+            end
+        end
 
         mv:SetForwardSpeed( 0 )
         mv:SetSideSpeed( 0 )
-        mv:SetButtons( bit.band( mv:GetButtons(), bit.bnot( IN_JUMP ) ) )
+        strip_buttons( mv, IN_JUMP )
+
+        if SERVER then
+            ply.scp131_last_speed = 0
+        end
+
         return
     end
 
     --  direction voulue par le joueur
-    local wish = Vector( 0, 0, 0 )
+    local wish
     local forward_speed, side_speed = mv:GetForwardSpeed(), mv:GetSideSpeed()
 
     if forward_speed ~= 0 or side_speed ~= 0 then
@@ -357,47 +526,60 @@ hook.Add( "SetupMove", "scp131:movement", function( ply, mv, cmd )
         wish.z = 0
 
         if wish:IsZero() then
-            wish = Vector( 0, 0, 0 )
+            wish = nil
         else
             wish:Normalize()
         end
     end
 
-    local max_speed = config131.wheel_max_speed
-    if scp131.is_swarming( ply ) then
-        max_speed = max_speed * ( 1 + config131.swarm_speed_bonus / 100 )
-    end
+    --  en l'air, la roue ne mord sur rien : on garde l'elan tel quel
+    if on_ground then
+        local max_speed = scp131.get_max_speed( ply, mv:KeyDown( IN_SPEED ) )
 
-    if wish:IsZero() then
-        --  pas de systeme de freinage : la roue continue sur son erre
-        speed = math.max( 0, speed - config131.wheel_coast_deceleration * delta )
+        if not wish then
+            --  pas de systeme de freinage : la roue continue sur son erre
+            speed = math.max( 0, speed - config131.wheel_coast_deceleration * delta )
+        elseif direction and direction:Dot( wish ) < BRAKE_DOT then
+            --  pousser a contresens, c'est freiner : la direction ne change pas, la vitesse tombe
+            speed = math.max( 0, speed - config131.wheel_brake_deceleration * delta )
+        else
+            direction = direction or wish
+
+            --  plus la roue va vite, moins elle accroche : elle vire large
+            local grip = Lerp( math.min( speed / max_speed, 1 ), 1, config131.wheel_grip_min )
+            local turn = math.Clamp( config131.wheel_turn_rate * grip * delta, 0, 1 )
+
+            direction = LerpVector( turn, direction, wish )
+            direction.z = 0
+
+            if direction:IsZero() then
+                direction = wish
+            else
+                direction:Normalize()
+            end
+
+            if speed <= max_speed then
+                speed = math.min( max_speed, speed + config131.wheel_acceleration * delta )
+            else
+                --  au-dessus du plafond (sprint relache, bourrade) : on redescend en douceur
+                speed = math.max( max_speed, speed - config131.wheel_brake_deceleration * delta )
+            end
+        end
 
         if speed < WHEEL_MIN_SPEED then
             speed = 0
         end
-    else
-        speed = math.min( max_speed, speed + config131.wheel_acceleration * delta )
 
-        --  plus la roue va vite, moins elle accroche : elle vire large
-        local grip = Lerp( speed / max_speed, 1, config131.wheel_grip_min )
-        local turn = math.Clamp( config131.wheel_turn_rate * grip * delta, 0, 1 )
-
-        direction = LerpVector( turn, direction, wish )
-        direction.z = 0
-
-        if direction:IsZero() then
-            direction = wish
+        if direction and speed > 0 then
+            mv:SetVelocity( Vector( direction.x * speed, direction.y * speed, velocity.z ) )
         else
-            direction:Normalize()
+            mv:SetVelocity( Vector( 0, 0, velocity.z ) )
         end
     end
 
-    ply.scp131_wheel_speed = speed
-    ply.scp131_wheel_dir = direction
-    ply.scp131_wheel_commanded = on_ground and speed or 0
-
-    if on_ground then
-        mv:SetVelocity( Vector( direction.x * speed, direction.y * speed, velocity.z ) )
+    if SERVER then
+        ply.scp131_last_speed = on_ground and speed or 0
+        ply.scp131_last_direction = direction
     end
 
     --  le moteur ne doit ni accelerer ni freiner a notre place

@@ -51,6 +51,8 @@ end )
     Les degats qu'il encaisse le renversent : il part en roulade et lache le
     173 quelques secondes. Sans cette prise, un pod immortel fige le 173
     indefiniment et personne ne peut rien y faire.
+    Les chutes n'en font pas partie : un pod qui saute d'une table ne doit pas
+    se sonner tout seul.
 ]]
 hook.Add( "EntityTakeDamage", "scp131:tumble", function( target, dmginfo )
     local attacker = dmginfo:GetAttacker()
@@ -58,12 +60,12 @@ hook.Add( "EntityTakeDamage", "scp131:tumble", function( target, dmginfo )
     --  un pod ne fait pas de degats, meme aux props et aux PNJ
     if config131.harmless and IsValid( attacker ) and attacker ~= target
         and attacker:IsPlayer() and scp131.is_scp_131( attacker ) then
-        dmginfo:SetDamage( 0 )
-        return
+        return true
     end
 
     if not config131.tumble_enabled then return end
     if not target:IsPlayer() or not scp131.is_scp_131( target ) then return end
+    if dmginfo:IsDamageType( DMG_FALL ) or attacker == target then return end
     if scp131.is_stunned( target ) then return end
 
     local time = CurTime()
@@ -85,14 +87,11 @@ hook.Add( "EntityTakeDamage", "scp131:tumble", function( target, dmginfo )
         direction:Normalize()
     end
 
-    local sounds = #config131.distress_sounds > 0 and config131.distress_sounds
-        or ( #config131.chirp_sounds > 0 and config131.chirp_sounds or nil )
-
     scp131.tumble(
         target,
         direction * config131.tumble_force + Vector( 0, 0, config131.tumble_lift ),
         config131.tumble_stun_time,
-        sounds
+        "distress"
     )
 end )
 
@@ -225,15 +224,8 @@ hook.Add( "scp131:companion_changed", "scp131:notify", function( pod, companion,
 end )
 
 
-hook.Add( "PlayerSpawn", "scp131:reset_wheel", function( ply )
-    ply.scp131_wheel_speed = 0
-    ply.scp131_wheel_commanded = 0
-    ply.scp131_climb_time = 0
-end )
-
-
 --=========================================================================
---  Niveau de carte magnetique et ressources
+--  Configuration : niveau de carte et ressources
 --=========================================================================
 
 --  le SWEP lisait la config a chaque tick : une mise a jour sur changement suffit
@@ -252,7 +244,7 @@ end )
 
 timer.Simple( 0, refresh_keycard_level )
 
---  sans envoi explicite, les clients n'ont aucun des sons configures
+--  sans envoi explicite, les clients n'ont aucun des sons custom ; les sons de base sont deja chez eux
 for _, sounds in ipairs( { config131.chirp_sounds, config131.distress_sounds, config131.crash_sounds } ) do
     for _, path in ipairs( sounds or {} ) do
         if not isstring( path ) or path == "" then continue end
