@@ -183,36 +183,70 @@ end
     joueur pour etre rendues telles quelles a la sortie du role, quel que soit
     l'addon qui les avait posees.
 ]]
+--  cotes voulues, avec replis : cote client, le filtre peut se synchroniser avant la config
+local function get_body_size()
+    local radius = config131.hull_radius or 10
+    local height = config131.hull_height or 22
+    local view = math.min( config131.view_height or 16, height - 2 )
+
+    return radius, height, view
+end
+
 function scp131.apply_body( ply )
     if not IsValid( ply ) then return end
+
+    local radius, height, view = get_body_size()
 
     if not ply.scp131_body_backup then
         local hull_mins, hull_maxs = ply:GetHull()
         local duck_mins, duck_maxs = ply:GetHullDuck()
+
+        --  si le corps est deja le notre (rechargement a chaud), on garde les cotes standard du joueur
+        if hull_maxs.z == height then
+            hull_mins, hull_maxs = Vector( -16, -16, 0 ), Vector( 16, 16, 72 )
+            duck_mins, duck_maxs = Vector( -16, -16, 0 ), Vector( 16, 16, 36 )
+        end
 
         ply.scp131_body_backup = {
             hull_mins = hull_mins,
             hull_maxs = hull_maxs,
             duck_mins = duck_mins,
             duck_maxs = duck_maxs,
-            view = ply:GetViewOffset(),
-            view_ducked = ply:GetViewOffsetDucked(),
-            friction = ply:GetFriction(),
+            view = hull_maxs.z == 72 and Vector( 0, 0, 64 ) or ply:GetViewOffset(),
+            view_ducked = hull_maxs.z == 72 and Vector( 0, 0, 28 ) or ply:GetViewOffsetDucked(),
+            friction = 1,
         }
     end
 
-    --  replis : cote client, le filtre peut se synchroniser avant la config
-    local radius = config131.hull_radius or 10
-    local height = config131.hull_height or 22
     local mins, maxs = Vector( -radius, -radius, 0 ), Vector( radius, radius, height )
 
     --  pas d'accroupissement : un pod n'a rien a plier
     ply:SetHull( mins, maxs )
     ply:SetHullDuck( mins, maxs )
 
-    local view = Vector( 0, 0, math.min( config131.view_height or 16, height - 2 ) )
-    ply:SetViewOffset( view )
-    ply:SetViewOffsetDucked( view )
+    local offset = Vector( 0, 0, view )
+    ply:SetViewOffset( offset )
+    ply:SetViewOffsetDucked( offset )
+end
+
+--[[
+    Verifie le corps a chaque tick de deplacement.
+
+    Le poser une fois ne suffit pas : la classe joueur remet hull et vue humains
+    a chaque spawn (dont le respawn d'un changement de metier, ou le filtre ne
+    relance pas son evenement puisque le joueur y est deja), et la synchro du
+    filtre cote client peut arriver apres la config. Le moteur recopie la vue
+    "debout" dans la vue courante a chaque tick : si un realm a 64 et l'autre
+    16, la camera saute de l'un a l'autre a chaque correction de prediction.
+    Deux lectures par tick, pas plus : on n'ecrit que sur difference.
+]]
+function scp131.enforce_body( ply )
+    local radius, height, view = get_body_size()
+    local _, maxs = ply:GetHull()
+
+    if maxs.z ~= height or maxs.x ~= radius or ply:GetViewOffset().z ~= view then
+        scp131.apply_body( ply )
+    end
 end
 
 function scp131.restore_body( ply )
@@ -432,6 +466,8 @@ end
 
 hook.Add( "SetupMove", "scp131:movement", function( ply, mv, cmd )
     if not scp131.is_scp_131( ply ) then return end
+
+    scp131.enforce_body( ply )
 
     --  noclip du staff, echelles, nage : on laisse le moteur faire son travail
     if ply:GetMoveType() ~= MOVETYPE_WALK then return end
